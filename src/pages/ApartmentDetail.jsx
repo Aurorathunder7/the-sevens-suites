@@ -1,210 +1,262 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
 import { supabase } from '../utils/supabase';
-import BookingModal from '../components/BookingModal';
+import ImageGallery from '../components/ImageGallery';
+import FacilityCard from '../components/FacilityCard';
+import InquiryModal from '../components/InquiryModal';
 
 const ApartmentDetail = () => {
-  const { id } = useParams();
   const [apartment, setApartment] = useState(null);
+  const [images, setImages] = useState([]);
+  const [facilities, setFacilities] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showBooking, setShowBooking] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(0);
+  const [showInquiry, setShowInquiry] = useState(false);
 
   useEffect(() => {
-    fetchApartment();
-  }, [id]);
+    fetchData();
+  }, []);
 
-  const fetchApartment = async () => {
-    const { data, error } = await supabase
-      .from('apartments')
+  const fetchData = async () => {
+    const { data: aptData } = await supabase
+      .from('apartment_details')
       .select('*')
-      .eq('id', id)
+      .limit(1)
       .single();
-    
-    if (error) {
-      console.error('Error fetching apartment:', error);
-    } else {
-      setApartment(data);
-    }
+
+    const { data: imgData } = await supabase
+      .from('apartment_images')
+      .select('*')
+      .order('display_order');
+
+    const { data: facData } = await supabase
+      .from('facilities')
+      .select('*')
+      .order('display_order');
+
+    setApartment(aptData);
+    setImages(imgData || []);
+    setFacilities(facData || []);
     setLoading(false);
   };
 
   if (loading) return <div style={styles.loading}>Loading...</div>;
-  if (!apartment) return <div style={styles.loading}>Apartment not found</div>;
-
-  const images = apartment.image_urls || [apartment.image_url];
+  if (!apartment) return <div style={styles.loading}>No data found</div>;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.imageSection}>
-        <img 
-          src={images[selectedImage] || 'https://via.placeholder.com/800x500'} 
-          alt={apartment.title}
-          style={styles.mainImage}
-        />
-        {images.length > 1 && (
-          <div style={styles.thumbnailStrip}>
-            {images.map((img, index) => (
-              <img
-                key={index}
-                src={img}
-                alt={`View ${index + 1}`}
-                style={{
-                  ...styles.thumbnail,
-                  border: selectedImage === index ? '3px solid #e94560' : '3px solid transparent'
-                }}
-                onClick={() => setSelectedImage(index)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-      
-      <div style={styles.content}>
-        <div style={styles.info}>
+    <div>
+      <div style={styles.hero}>
+        <div style={styles.heroOverlay}></div>
+        <div style={styles.heroContent}>
           <h1 style={styles.title}>{apartment.title}</h1>
-          <div style={styles.details}>
-            <span>🛏️ {apartment.bedrooms} Bedrooms</span>
-            <span>🚽 {apartment.bathrooms} Bathrooms</span>
-            <span>👥 Sleeps {apartment.max_guests}</span>
+          <p style={styles.location}>📍 {apartment.location}</p>
+        </div>
+      </div>
+
+      <div style={styles.container}>
+        <ImageGallery images={images} />
+
+        <div style={styles.content}>
+          <div style={styles.mainInfo}>
+            <div style={styles.specs}>
+              <div style={styles.spec}>
+                <span style={styles.specValue}>{apartment.bedrooms}</span>
+                <span style={styles.specLabel}>Bedrooms</span>
+              </div>
+              <div style={styles.spec}>
+                <span style={styles.specValue}>{apartment.bathrooms}</span>
+                <span style={styles.specLabel}>Bathrooms</span>
+              </div>
+              <div style={styles.spec}>
+                <span style={styles.specValue}>{apartment.max_guests}</span>
+                <span style={styles.specLabel}>Max Guests</span>
+              </div>
+              <div style={styles.spec}>
+                <span style={styles.specValue}>{apartment.size_sqft}</span>
+                <span style={styles.specLabel}>Sq Ft</span>
+              </div>
+            </div>
+
+            <div style={styles.description}>
+              <h2>About This Property</h2>
+              <p>{apartment.description}</p>
+            </div>
+
+            <div style={styles.pricing}>
+              <h2>Pricing</h2>
+              <div style={styles.priceCards}>
+                <div style={styles.priceCard}>
+                  <span style={styles.priceValue}>${apartment.price_per_night}</span>
+                  <span style={styles.priceLabel}>per night</span>
+                </div>
+                <div style={styles.priceCard}>
+                  <span style={styles.priceValue}>${apartment.price_per_month}</span>
+                  <span style={styles.priceLabel}>per month</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.facilities}>
+              <h2>Amenities</h2>
+              <div style={styles.facilitiesGrid}>
+                {facilities.map(facility => (
+                  <FacilityCard key={facility.id} facility={facility} />
+                ))}
+              </div>
+            </div>
           </div>
-          <p style={styles.description}>{apartment.description}</p>
-          
-          <div style={styles.amenities}>
-            <h3>Amenities</h3>
-            <div style={styles.amenitiesList}>
-              {apartment.amenities?.map((amenity, index) => (
-                <span key={index} style={styles.amenityTag}>✓ {amenity}</span>
-              ))}
+
+          <div style={styles.sidebar}>
+            <div style={styles.contactCard}>
+              <h3>Contact Owner</h3>
+              <div style={styles.contactInfo}>
+                <p>📧 {apartment.contact_email}</p>
+                <p>📞 {apartment.contact_phone}</p>
+              </div>
+              <button onClick={() => setShowInquiry(true)} style={styles.inquireBtn}>
+                Send Inquiry
+              </button>
             </div>
           </div>
         </div>
-        
-        <div style={styles.bookingCard}>
-          <div style={styles.price}>
-            <span style={styles.priceAmount}>${apartment.price_per_night}</span>
-            <span>/ night</span>
-          </div>
-          <button 
-            onClick={() => setShowBooking(true)}
-            style={styles.bookButton}
-          >
-            Book Now
-          </button>
-        </div>
       </div>
 
-      {showBooking && (
-        <BookingModal 
-          apartment={apartment}
-          onClose={() => setShowBooking(false)}
-        />
-      )}
+      {showInquiry && <InquiryModal onClose={() => setShowInquiry(false)} />}
     </div>
   );
 };
 
 const styles = {
+  hero: {
+    height: '50vh',
+    backgroundImage: 'url(https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1600)',
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%)',
+  },
+  heroContent: {
+    position: 'relative',
+    textAlign: 'center',
+    color: 'white',
+  },
+  title: {
+    fontSize: '3rem',
+    marginBottom: '0.5rem',
+  },
+  location: {
+    fontSize: '1.2rem',
+    opacity: 0.9,
+  },
   container: {
     maxWidth: '1200px',
     margin: '2rem auto',
     padding: '0 20px',
   },
-  imageSection: {
-    marginBottom: '2rem',
-  },
-  mainImage: {
-    width: '100%',
-    height: '500px',
-    objectFit: 'cover',
-    borderRadius: '10px',
-  },
-  thumbnailStrip: {
-    display: 'flex',
-    gap: '1rem',
-    marginTop: '1rem',
-    overflowX: 'auto',
-  },
-  thumbnail: {
-    width: '100px',
-    height: '70px',
-    objectFit: 'cover',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    transition: 'transform 0.2s',
-  },
   content: {
     display: 'grid',
     gridTemplateColumns: '2fr 1fr',
     gap: '2rem',
-    flexWrap: 'wrap',
-  },
-  info: {
-    backgroundColor: 'white',
-    padding: '2rem',
-    borderRadius: '10px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-  },
-  title: {
-    color: '#1a1a2e',
-    marginBottom: '1rem',
-  },
-  details: {
-    display: 'flex',
-    gap: '2rem',
-    marginBottom: '1.5rem',
-    paddingBottom: '1rem',
-    borderBottom: '1px solid #eee',
-    flexWrap: 'wrap',
-  },
-  description: {
-    lineHeight: '1.6',
-    marginBottom: '2rem',
-    color: '#666',
-  },
-  amenities: {
     marginTop: '2rem',
   },
-  amenitiesList: {
+  mainInfo: {
+    gridColumn: '1',
+  },
+  sidebar: {
+    gridColumn: '2',
+  },
+  specs: {
     display: 'flex',
+    gap: '2rem',
+    padding: '1.5rem',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '12px',
+    marginBottom: '2rem',
     flexWrap: 'wrap',
-    gap: '0.5rem',
+  },
+  spec: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  specValue: {
+    fontSize: '1.8rem',
+    fontWeight: 'bold',
+    color: '#e94560',
+  },
+  specLabel: {
+    fontSize: '0.9rem',
+    color: '#666',
+  },
+  description: {
+    marginBottom: '2rem',
+    lineHeight: '1.8',
+    color: '#444',
+  },
+  pricing: {
+    marginBottom: '2rem',
+  },
+  priceCards: {
+    display: 'flex',
+    gap: '1rem',
     marginTop: '1rem',
   },
-  amenityTag: {
-    backgroundColor: '#f0f0f0',
-    padding: '0.5rem 1rem',
-    borderRadius: '20px',
-    fontSize: '0.9rem',
-  },
-  bookingCard: {
-    backgroundColor: 'white',
-    padding: '2rem',
-    borderRadius: '10px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    height: 'fit-content',
-    position: 'sticky',
-    top: '100px',
-  },
-  price: {
-    fontSize: '1.2rem',
-    marginBottom: '1.5rem',
+  priceCard: {
+    flex: 1,
+    padding: '1.5rem',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '12px',
     textAlign: 'center',
   },
-  priceAmount: {
+  priceValue: {
+    display: 'block',
     fontSize: '2rem',
     fontWeight: 'bold',
     color: '#e94560',
   },
-  bookButton: {
+  priceLabel: {
+    fontSize: '0.9rem',
+    color: '#666',
+  },
+  facilities: {
+    marginTop: '2rem',
+  },
+  facilitiesGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gap: '1rem',
+    marginTop: '1rem',
+  },
+  contactCard: {
+    backgroundColor: 'white',
+    padding: '1.5rem',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    position: 'sticky',
+    top: '100px',
+  },
+  contactInfo: {
+    margin: '1rem 0',
+    lineHeight: '1.8',
+  },
+  inquireBtn: {
     width: '100%',
     padding: '1rem',
     backgroundColor: '#e94560',
     color: 'white',
     border: 'none',
-    borderRadius: '5px',
-    fontSize: '1.1rem',
+    borderRadius: '8px',
     cursor: 'pointer',
+    fontSize: '1rem',
+    fontWeight: 'bold',
     transition: 'background-color 0.3s',
   },
   loading: {

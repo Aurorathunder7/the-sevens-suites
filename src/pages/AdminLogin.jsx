@@ -8,17 +8,17 @@ const AdminLogin = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
-    // Demo credentials - in production, use Supabase Auth
-    if (email === 'admin@luxurystays.com' && password === 'admin123') {
+    // Demo admin credentials
+    if (email === 'admin@luxuryvilla.com' && password === 'admin123') {
       localStorage.setItem('isAdmin', 'true');
       navigate('/admin');
     } else {
-      setError('Invalid email or password');
+      setError('Invalid credentials. Use admin@luxuryvilla.com / admin123');
     }
     setLoading(false);
   };
@@ -26,24 +26,22 @@ const AdminLogin = () => {
   return (
     <div style={styles.container}>
       <div style={styles.loginBox}>
-        <div style={styles.header}>
-          <h2 style={styles.title}>Admin Login</h2>
-          <p style={styles.subtitle}>Access your apartment management dashboard</p>
-        </div>
+        <h2 style={styles.title}>Admin Login</h2>
+        <p style={styles.subtitle}>Manage Apartment Content & Images</p>
         <form onSubmit={handleSubmit}>
           <div style={styles.formGroup}>
-            <label style={styles.label}>Email Address</label>
+            <label>Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               style={styles.input}
-              placeholder="admin@luxurystays.com"
+              placeholder="admin@luxuryvilla.com"
             />
           </div>
           <div style={styles.formGroup}>
-            <label style={styles.label}>Password</label>
+            <label>Password</label>
             <input
               type="password"
               value={password}
@@ -55,12 +53,12 @@ const AdminLogin = () => {
           </div>
           {error && <div style={styles.error}>{error}</div>}
           <button type="submit" disabled={loading} style={styles.button}>
-            {loading ? 'Logging in...' : 'Login to Dashboard'}
+            {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
         <div style={styles.demo}>
-          <p>Demo Credentials:</p>
-          <p>Email: admin@luxurystays.com</p>
+          <p>Demo Access:</p>
+          <p>Email: admin@luxuryvilla.com</p>
           <p>Password: admin123</p>
         </div>
       </div>
@@ -74,44 +72,35 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     minHeight: '80vh',
-    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    backgroundColor: '#f5f5f5',
   },
   loginBox: {
     backgroundColor: 'white',
-    padding: '2.5rem',
+    padding: '2rem',
     borderRadius: '10px',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
     width: '100%',
-    maxWidth: '450px',
-  },
-  header: {
-    textAlign: 'center',
-    marginBottom: '2rem',
+    maxWidth: '400px',
   },
   title: {
+    textAlign: 'center',
     marginBottom: '0.5rem',
     color: '#1a1a2e',
   },
   subtitle: {
+    textAlign: 'center',
     color: '#666',
-    fontSize: '0.9rem',
+    marginBottom: '2rem',
   },
   formGroup: {
-    marginBottom: '1.5rem',
-  },
-  label: {
-    display: 'block',
-    marginBottom: '0.5rem',
-    color: '#333',
-    fontWeight: '500',
+    marginBottom: '1rem',
   },
   input: {
     width: '100%',
     padding: '0.75rem',
-    border: '2px solid #e0e0e0',
+    border: '1px solid #ddd',
     borderRadius: '5px',
-    fontSize: '1rem',
-    transition: 'border-color 0.3s',
+    marginTop: '0.25rem',
   },
   button: {
     width: '100%',
@@ -122,8 +111,6 @@ const styles = {
     borderRadius: '5px',
     cursor: 'pointer',
     fontSize: '1rem',
-    fontWeight: 'bold',
-    transition: 'background-color 0.3s',
   },
   error: {
     backgroundColor: '#fee',

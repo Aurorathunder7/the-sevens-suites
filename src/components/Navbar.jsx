@@ -6,13 +6,9 @@ const Navbar = () => {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    checkAdmin();
-  }, []);
-
-  const checkAdmin = () => {
     const adminStatus = localStorage.getItem('isAdmin');
     setIsAdmin(adminStatus === 'true');
-  };
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('isAdmin');
@@ -25,19 +21,18 @@ const Navbar = () => {
     <nav style={styles.navbar}>
       <div style={styles.container}>
         <Link to="/" style={styles.logo}>
-          🏢 LuxuryStays
+          🏠 Luxury Villa
         </Link>
         <div style={styles.navLinks}>
           <Link to="/" style={styles.link}>Home</Link>
-          <Link to="/apartments" style={styles.link}>Apartments</Link>
+          <Link to="/apartment" style={styles.link}>The Villa</Link>
           {isAdmin ? (
             <>
               <Link to="/admin" style={styles.link}>Dashboard</Link>
-              <Link to="/bookings" style={styles.link}>Bookings</Link>
               <button onClick={handleLogout} style={styles.logoutBtn}>Logout</button>
             </>
           ) : (
-            <Link to="/admin-login" style={styles.link}>Admin</Link>
+            <Link to="/admin-login" style={styles.adminLink}>Admin</Link>
           )}
         </div>
       </div>
@@ -60,6 +55,7 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   logo: {
     color: '#e94560',
@@ -71,11 +67,16 @@ const styles = {
     display: 'flex',
     gap: '2rem',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   link: {
     color: 'white',
     textDecoration: 'none',
     transition: 'color 0.3s',
+  },
+  adminLink: {
+    color: '#e94560',
+    textDecoration: 'none',
   },
   logoutBtn: {
     backgroundColor: '#e94560',

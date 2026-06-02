@@ -1,25 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
-import ImageUpload from '../components/ImageUpload';
+import AdminImageManager from '../components/AdminImageManager';
 
 const AdminDashboard = () => {
-  const [apartments, setApartments] = useState([]);
+  const [apartment, setApartment] = useState(null);
+  const [images, setImages] = useState([]);
+  const [facilities, setFacilities] = useState([]);
+  const [inquiries, setInquiries] = useState([]);
+  const [activeTab, setActiveTab] = useState('details');
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editingApartment, setEditingApartment] = useState(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    price_per_night: '',
-    bedrooms: '',
-    bathrooms: '',
-    max_guests: '',
-    amenities: []
-  });
+  const [saving, setSaving] = useState(false);
+  const [uploadingFacility, setUploadingFacility] = useState(false);
+  const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
+  const [newFacilityName, setNewFacilityName] = useState('');
+  const [newFacilityDesc, setNewFacilityDesc] = useState('');
+  const [selectedFacilityImage, setSelectedFacilityImage] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [inquiryFilter, setInquiryFilter] = useState('all');
+  let subscription = null;
 
   useEffect(() => {
     checkAuth();
-    fetchApartments();
+    fetchAllData();
+    // Set up real-time subscription for inquiries
+    setupRealtimeSubscription();
+    
+    // Cleanup subscription on component unmount
+    return () => {
+      if (subscription) {
+        supabase.removeChannel(subscription);
+      }
+    };
   }, []);
 
   const checkAuth = () => {
@@ -29,297 +40,597 @@ const AdminDashboard = () => {
     }
   };
 
-  const fetchApartments = async () => {
-    const { data, error } = await supabase
-      .from('apartments')
-      .select('*')
-      .order('created_at', { ascending: false });
+  // Fixed real-time subscription setup
+  const setupRealtimeSubscription = () => {
+    // Create channel first
+    const channel = supabase.channel('inquiries_channel');
     
-    if (error) {
-      console.error('Error fetching apartments:', error);
-    } else {
-      setApartments(data);
-    }
-    setLoading(false);
+    // Add event listener BEFORE subscribing
+    channel
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'inquiries' },
+        (payload) => {
+          console.log('New inquiry received:', payload);
+          showNotification(`📧 New inquiry from ${payload.new.name}!`, 'success');
+          fetchAllData(); // Refresh the list
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
+    
+    subscription = channel;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    if (editingApartment) {
-      // Update existing apartment
-      const { error } = await supabase
-        .from('apartments')
-        .update(formData)
-        .eq('id', editingApartment.id);
-      
-      if (error) {
-        alert('Error updating apartment');
-      } else {
-        alert('Apartment updated successfully!');
-        resetForm();
-        fetchApartments();
-      }
-    } else {
-      // Create new apartment
-      const { error } = await supabase
-        .from('apartments')
-        .insert([{
-          ...formData,
-          price_per_night: parseFloat(formData.price_per_night),
-          bedrooms: parseInt(formData.bedrooms),
-          bathrooms: parseInt(formData.bathrooms),
-          max_guests: parseInt(formData.max_guests),
-          image_urls: [],
-          amenities: formData.amenities.split(',').map(a => a.trim())
-        }]);
-      
-      if (error) {
-        alert('Error creating apartment');
-      } else {
-        alert('Apartment created successfully!');
-        resetForm();
-        fetchApartments();
-      }
-    }
-    setLoading(false);
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this apartment? This will also delete all associated images.')) {
-      // First, get apartment to delete images from storage
-      const { data: apartment } = await supabase
-        .from('apartments')
-        .select('image_urls')
-        .eq('id', id)
+  const fetchAllData = async () => {
+    try {
+      // Fetch apartment details
+      const { data: aptData, error: aptError } = await supabase
+        .from('apartment_details')
+        .select('*')
+        .limit(1)
         .single();
 
-      // Delete images from storage
-      if (apartment?.image_urls) {
-        for (const imageUrl of apartment.image_urls) {
-          const filePath = imageUrl.split('/').slice(-2).join('/');
-          await supabase.storage.from('apartment-images').remove([filePath]);
-        }
-      }
+      if (aptError) throw aptError;
 
-      // Delete apartment from database
-      const { error } = await supabase
-        .from('apartments')
-        .delete()
-        .eq('id', id);
-      
-      if (error) {
-        alert('Error deleting apartment');
-      } else {
-        alert('Apartment deleted successfully!');
-        fetchApartments();
-      }
+      // Fetch images
+      const { data: imgData, error: imgError } = await supabase
+        .from('apartment_images')
+        .select('*')
+        .order('display_order');
+
+      if (imgError) throw imgError;
+
+      // Fetch facilities
+      const { data: facData, error: facError } = await supabase
+        .from('facilities')
+        .select('*')
+        .order('display_order');
+
+      if (facError) throw facError;
+
+      // Fetch inquiries
+      const { data: inqData, error: inqError } = await supabase
+        .from('inquiries')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (inqError) throw inqError;
+
+      setApartment(aptData);
+      setImages(imgData || []);
+      setFacilities(facData || []);
+      setInquiries(inqData || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      showNotification('Error loading data: ' + error.message, 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleEdit = (apartment) => {
-    setEditingApartment(apartment);
-    setFormData({
-      title: apartment.title,
-      description: apartment.description,
-      price_per_night: apartment.price_per_night,
-      bedrooms: apartment.bedrooms,
-      bathrooms: apartment.bathrooms,
-      max_guests: apartment.max_guests,
-      amenities: apartment.amenities?.join(', ') || ''
-    });
-    setShowForm(true);
+  const handleApartmentUpdate = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+
+    const { error } = await supabase
+      .from('apartment_details')
+      .update(apartment)
+      .eq('id', apartment.id);
+
+    if (error) {
+      showNotification('Error updating details: ' + error.message, 'error');
+    } else {
+      showNotification('Details updated successfully!', 'success');
+    }
+    setSaving(false);
   };
 
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      price_per_night: '',
-      bedrooms: '',
-      bathrooms: '',
-      max_guests: '',
-      amenities: []
-    });
-    setEditingApartment(null);
-    setShowForm(false);
-  };
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
+  const handleInputChange = (e) => {
+    setApartment({
+      ...apartment,
       [e.target.name]: e.target.value
     });
   };
 
+  const handleAddFacility = async () => {
+    if (!newFacilityName.trim()) {
+      showNotification('Please enter a facility name', 'error');
+      return;
+    }
+
+    setUploadingFacility(true);
+
+    try {
+      let imageUrl = null;
+
+      // Upload image if selected
+      if (selectedFacilityImage) {
+        const fileExt = selectedFacilityImage.name.split('.').pop();
+        const fileName = `facilities/${Date.now()}-${Math.random()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('apartment-images')
+          .upload(fileName, selectedFacilityImage);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('apartment-images')
+          .getPublicUrl(fileName);
+
+        imageUrl = publicUrl;
+      }
+
+      // Insert facility into database
+      const { error: insertError } = await supabase
+        .from('facilities')
+        .insert([{ 
+          name: newFacilityName,
+          description: newFacilityDesc,
+          image_url: imageUrl,
+          display_order: facilities.length
+        }]);
+
+      if (insertError) throw insertError;
+
+      // Reset form
+      setNewFacilityName('');
+      setNewFacilityDesc('');
+      setSelectedFacilityImage(null);
+      setShowAddFacilityModal(false);
+      
+      showNotification('Facility added successfully!', 'success');
+      fetchAllData(); // Refresh the list
+      
+    } catch (error) {
+      console.error('Error adding facility:', error);
+      showNotification('Error adding facility: ' + error.message, 'error');
+    } finally {
+      setUploadingFacility(false);
+    }
+  };
+
+  const deleteFacility = async (id) => {
+    if (window.confirm('Delete this facility?')) {
+      const { error } = await supabase
+        .from('facilities')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        showNotification('Error deleting facility: ' + error.message, 'error');
+      } else {
+        showNotification('Facility deleted successfully!', 'success');
+        fetchAllData();
+      }
+    }
+  };
+
+  const updateInquiryStatus = async (id, status) => {
+    const { error } = await supabase
+      .from('inquiries')
+      .update({ status })
+      .eq('id', id);
+    
+    if (error) {
+      showNotification('Error updating status: ' + error.message, 'error');
+    } else {
+      showNotification('Status updated successfully!', 'success');
+      fetchAllData();
+    }
+  };
+
+  const deleteInquiry = async (id) => {
+    if (window.confirm('Delete this inquiry?')) {
+      const { error } = await supabase
+        .from('inquiries')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        showNotification('Error deleting inquiry: ' + error.message, 'error');
+      } else {
+        showNotification('Inquiry deleted successfully!', 'success');
+        fetchAllData();
+      }
+    }
+  };
+
+  const getFilteredInquiries = () => {
+    if (inquiryFilter === 'all') return inquiries;
+    return inquiries.filter(i => i.status === inquiryFilter);
+  };
+
+  const getStatusBadgeStyle = (status) => {
+    switch(status) {
+      case 'new': return { backgroundColor: '#ff9800', color: 'white' };
+      case 'read': return { backgroundColor: '#2196F3', color: 'white' };
+      case 'responded': return { backgroundColor: '#4caf50', color: 'white' };
+      default: return { backgroundColor: '#999', color: 'white' };
+    }
+  };
+
+  if (loading) return <div style={styles.loading}>Loading...</div>;
+
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Admin Dashboard</h1>
-        <button 
-          onClick={() => setShowForm(!showForm)} 
-          style={styles.addButton}
+      {/* Notification Toast */}
+      {notification && (
+        <div style={{
+          ...styles.notification,
+          backgroundColor: notification.type === 'success' ? '#4caf50' : '#f44336'
+        }}>
+          {notification.message}
+        </div>
+      )}
+
+      <h1 style={styles.title}>Admin Dashboard</h1>
+      
+      <div style={styles.tabs}>
+        <button
+          onClick={() => setActiveTab('details')}
+          style={{...styles.tab, ...(activeTab === 'details' ? styles.activeTab : {})}}
         >
-          {showForm ? 'Cancel' : '+ Add New Apartment'}
+          🏠 Property Details
+        </button>
+        <button
+          onClick={() => setActiveTab('images')}
+          style={{...styles.tab, ...(activeTab === 'images' ? styles.activeTab : {})}}
+        >
+          🖼️ Images ({images.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('facilities')}
+          style={{...styles.tab, ...(activeTab === 'facilities' ? styles.activeTab : {})}}
+        >
+          ✨ Facilities ({facilities.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('inquiries')}
+          style={{...styles.tab, ...(activeTab === 'inquiries' ? styles.activeTab : {})}}
+        >
+          📧 Inquiries ({inquiries.filter(i => i.status === 'new').length})
         </button>
       </div>
 
-      {showForm && (
-        <div style={styles.formContainer}>
-          <h2>{editingApartment ? 'Edit Apartment' : 'Add New Apartment'}</h2>
-          <form onSubmit={handleSubmit} style={styles.form}>
+      {/* Property Details Tab */}
+      {activeTab === 'details' && apartment && (
+        <div style={styles.tabContent}>
+          <form onSubmit={handleApartmentUpdate}>
             <div style={styles.formGrid}>
               <div style={styles.formGroup}>
-                <label>Title *</label>
+                <label>Property Title</label>
                 <input
                   type="text"
                   name="title"
-                  required
-                  value={formData.title}
-                  onChange={handleChange}
+                  value={apartment.title}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.formGroup}>
-                <label>Price per night ($) *</label>
+                <label>Location</label>
+                <input
+                  type="text"
+                  name="location"
+                  value={apartment.location}
+                  onChange={handleInputChange}
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label>Price per Night ($)</label>
                 <input
                   type="number"
                   name="price_per_night"
-                  required
-                  value={formData.price_per_night}
-                  onChange={handleChange}
+                  value={apartment.price_per_night}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.formGroup}>
-                <label>Bedrooms *</label>
+                <label>Price per Month ($)</label>
+                <input
+                  type="number"
+                  name="price_per_month"
+                  value={apartment.price_per_month}
+                  onChange={handleInputChange}
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label>Bedrooms</label>
                 <input
                   type="number"
                   name="bedrooms"
-                  required
-                  value={formData.bedrooms}
-                  onChange={handleChange}
+                  value={apartment.bedrooms}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.formGroup}>
-                <label>Bathrooms *</label>
+                <label>Bathrooms</label>
                 <input
                   type="number"
                   name="bathrooms"
-                  required
-                  value={formData.bathrooms}
-                  onChange={handleChange}
+                  value={apartment.bathrooms}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.formGroup}>
-                <label>Max Guests *</label>
+                <label>Max Guests</label>
                 <input
                   type="number"
                   name="max_guests"
-                  required
-                  value={formData.max_guests}
-                  onChange={handleChange}
+                  value={apartment.max_guests}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.formGroup}>
-                <label>Amenities (comma separated)</label>
+                <label>Size (sq ft)</label>
                 <input
-                  type="text"
-                  name="amenities"
-                  placeholder="WiFi, Pool, Gym, Parking"
-                  value={formData.amenities}
-                  onChange={handleChange}
+                  type="number"
+                  name="size_sqft"
+                  value={apartment.size_sqft}
+                  onChange={handleInputChange}
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label>Contact Email</label>
+                <input
+                  type="email"
+                  name="contact_email"
+                  value={apartment.contact_email}
+                  onChange={handleInputChange}
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label>Contact Phone</label>
+                <input
+                  type="tel"
+                  name="contact_phone"
+                  value={apartment.contact_phone}
+                  onChange={handleInputChange}
                   style={styles.input}
                 />
               </div>
               <div style={styles.fullWidth}>
-                <label>Description *</label>
+                <label>Description</label>
                 <textarea
                   name="description"
-                  required
-                  rows="4"
-                  value={formData.description}
-                  onChange={handleChange}
+                  rows="6"
+                  value={apartment.description}
+                  onChange={handleInputChange}
                   style={styles.textarea}
                 />
               </div>
             </div>
-            <button type="submit" style={styles.submitBtn}>
-              {editingApartment ? 'Update Apartment' : 'Create Apartment'}
+            <button type="submit" disabled={saving} style={styles.saveBtn}>
+              {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </form>
         </div>
       )}
 
-      {editingApartment && (
-        <div style={styles.imageSection}>
-          <h3>Manage Apartment Images</h3>
-          <ImageUpload 
-            apartmentId={editingApartment.id}
-            existingImages={editingApartment.image_urls || []}
-            onImageUploaded={(images) => {
-              setEditingApartment({...editingApartment, image_urls: images});
-            }}
+      {/* Images Tab */}
+      {activeTab === 'images' && (
+        <div style={styles.tabContent}>
+          <AdminImageManager 
+            images={images}
+            onImagesUpdate={fetchAllData}
           />
         </div>
       )}
 
-      <div style={styles.apartmentsList}>
-        <h2>Your Apartments ({apartments.length})</h2>
-        {loading ? (
-          <p>Loading...</p>
-        ) : (
-          <div style={styles.tableContainer}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th>Image</th>
-                  <th>Title</th>
-                  <th>Price/Night</th>
-                  <th>Bedrooms</th>
-                  <th>Bookings</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {apartments.map(apartment => (
-                  <tr key={apartment.id}>
-                    <td>
-                      <img 
-                        src={apartment.image_url || 'https://via.placeholder.com/50'} 
-                        alt={apartment.title}
-                        style={styles.tableImage}
-                      />
-                    </td>
-                    <td>{apartment.title}</td>
-                    <td>${apartment.price_per_night}</td>
-                    <td>{apartment.bedrooms}</td>
-                    <td>{apartment.bookings_count || 0}</td>
-                    <td>
-                      <button 
-                        onClick={() => handleEdit(apartment)} 
-                        style={styles.editBtn}
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(apartment.id)} 
-                        style={styles.deleteBtn}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Facilities Tab */}
+      {activeTab === 'facilities' && (
+        <div style={styles.tabContent}>
+          <button onClick={() => setShowAddFacilityModal(true)} style={styles.addBtn}>
+            + Add New Facility
+          </button>
+          
+          <div style={styles.facilitiesList}>
+            {facilities.map(facility => (
+              <div key={facility.id} style={styles.facilityItem}>
+                {facility.image_url ? (
+                  <img src={facility.image_url} alt={facility.name} style={styles.facilityImage} />
+                ) : (
+                  <div style={styles.facilityImagePlaceholder}>🏢</div>
+                )}
+                <div style={styles.facilityInfo}>
+                  <span style={styles.facilityName}>{facility.name}</span>
+                  {facility.description && <span style={styles.facilityDesc}>{facility.description}</span>}
+                </div>
+                <button
+                  onClick={() => deleteFacility(facility.id)}
+                  style={styles.deleteSmallBtn}
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+            ))}
+            {facilities.length === 0 && (
+              <p style={styles.noData}>No facilities added yet. Click "Add New Facility" to get started.</p>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Inquiries Tab */}
+      {activeTab === 'inquiries' && (
+        <div style={styles.tabContent}>
+          <div style={styles.inquiryHeader}>
+            <div style={styles.filterGroup}>
+              <button
+                onClick={() => setInquiryFilter('all')}
+                style={{...styles.filterBtn, ...(inquiryFilter === 'all' ? styles.activeFilterBtn : {})}}
+              >
+                All ({inquiries.length})
+              </button>
+              <button
+                onClick={() => setInquiryFilter('new')}
+                style={{...styles.filterBtn, ...(inquiryFilter === 'new' ? styles.activeFilterBtn : {})}}
+              >
+                🔴 New ({inquiries.filter(i => i.status === 'new').length})
+              </button>
+              <button
+                onClick={() => setInquiryFilter('read')}
+                style={{...styles.filterBtn, ...(inquiryFilter === 'read' ? styles.activeFilterBtn : {})}}
+              >
+                👀 Read ({inquiries.filter(i => i.status === 'read').length})
+              </button>
+              <button
+                onClick={() => setInquiryFilter('responded')}
+                style={{...styles.filterBtn, ...(inquiryFilter === 'responded' ? styles.activeFilterBtn : {})}}
+              >
+                ✅ Responded ({inquiries.filter(i => i.status === 'responded').length})
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.inquiriesList}>
+            {getFilteredInquiries().map(inquiry => (
+              <div key={inquiry.id} style={styles.inquiryCard}>
+                <div style={styles.inquiryHeader}>
+                  <div>
+                    <strong>{inquiry.name}</strong>
+                    <span style={styles.inquiryEmail}> - {inquiry.email}</span>
+                    {inquiry.phone && <span style={styles.inquiryPhone}> - 📞 {inquiry.phone}</span>}
+                  </div>
+                  <div style={styles.inquiryActions}>
+                    <select
+                      value={inquiry.status}
+                      onChange={(e) => updateInquiryStatus(inquiry.id, e.target.value)}
+                      style={{...styles.statusSelect, ...getStatusBadgeStyle(inquiry.status)}}
+                    >
+                      <option value="new">📧 New</option>
+                      <option value="read">👀 Mark as Read</option>
+                      <option value="responded">✅ Mark as Responded</option>
+                    </select>
+                    <button
+                      onClick={() => deleteInquiry(inquiry.id)}
+                      style={styles.deleteInquiryBtn}
+                      title="Delete inquiry"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+                
+                {inquiry.check_in && (
+                  <div style={styles.inquiryDates}>
+                    📅 {new Date(inquiry.check_in).toLocaleDateString()} → {new Date(inquiry.check_out).toLocaleDateString()}
+                    {inquiry.guests && ` | 👥 ${inquiry.guests} guests`}
+                  </div>
+                )}
+                
+                <p style={styles.inquiryMessage}>{inquiry.message || 'No message provided'}</p>
+                
+                <div style={styles.inquiryFooter}>
+                  <small>Received: {new Date(inquiry.created_at).toLocaleString()}</small>
+                  <button
+                    onClick={() => window.location.href = `mailto:${inquiry.email}`}
+                    style={styles.replyBtn}
+                  >
+                    📧 Reply via Email
+                  </button>
+                </div>
+              </div>
+            ))}
+            {getFilteredInquiries().length === 0 && (
+              <p style={styles.noData}>No inquiries found</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Add Facility Modal */}
+      {showAddFacilityModal && (
+        <div style={styles.modalOverlay} onClick={() => setShowAddFacilityModal(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>Add New Facility</h2>
+            
+            <div style={styles.formGroup}>
+              <label>Facility Name *</label>
+              <input
+                type="text"
+                value={newFacilityName}
+                onChange={(e) => setNewFacilityName(e.target.value)}
+                placeholder="e.g., Swimming Pool, Gym, Spa"
+                style={styles.input}
+              />
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label>Description (optional)</label>
+              <textarea
+                value={newFacilityDesc}
+                onChange={(e) => setNewFacilityDesc(e.target.value)}
+                placeholder="Brief description of this facility"
+                style={styles.textarea}
+                rows="3"
+              />
+            </div>
+            
+            <div style={styles.formGroup}>
+              <label>Facility Image</label>
+              <div style={styles.imageUploadArea}>
+                {selectedFacilityImage ? (
+                  <div style={styles.imagePreview}>
+                    <img 
+                      src={URL.createObjectURL(selectedFacilityImage)} 
+                      alt="Preview"
+                      style={styles.previewImage}
+                    />
+                    <button
+                      onClick={() => setSelectedFacilityImage(null)}
+                      style={styles.removeImageBtn}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <label style={styles.uploadImageLabel}>
+                    📸 Click to upload image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setSelectedFacilityImage(e.target.files[0])}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+            
+            <div style={styles.modalActions}>
+              <button
+                onClick={() => setShowAddFacilityModal(false)}
+                style={styles.cancelModalBtn}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddFacility}
+                disabled={uploadingFacility || !newFacilityName.trim()}
+                style={styles.submitModalBtn}
+              >
+                {uploadingFacility ? 'Adding...' : 'Add Facility'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -329,43 +640,56 @@ const styles = {
     maxWidth: '1400px',
     margin: '2rem auto',
     padding: '0 20px',
+    position: 'relative',
   },
-  header: {
+  notification: {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    padding: '1rem 1.5rem',
+    borderRadius: '8px',
+    color: 'white',
+    zIndex: 2000,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+  },
+  title: {
+    fontSize: '2rem',
+    color: '#1a1a2e',
+    marginBottom: '2rem',
+  },
+  tabs: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: '0.5rem',
+    borderBottom: '2px solid #e0e0e0',
     marginBottom: '2rem',
     flexWrap: 'wrap',
   },
-  title: {
-    color: '#1a1a2e',
-  },
-  addButton: {
+  tab: {
     padding: '0.75rem 1.5rem',
-    backgroundColor: '#4CAF50',
-    color: 'white',
+    backgroundColor: 'transparent',
     border: 'none',
-    borderRadius: '5px',
     cursor: 'pointer',
     fontSize: '1rem',
+    fontWeight: '500',
+    transition: 'all 0.3s',
   },
-  formContainer: {
+  activeTab: {
+    borderBottom: '3px solid #e94560',
+    color: '#e94560',
+  },
+  tabContent: {
     backgroundColor: 'white',
     padding: '2rem',
-    borderRadius: '10px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    marginBottom: '2rem',
-  },
-  form: {
-    marginTop: '1rem',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
   },
   formGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-    gap: '1rem',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '1.5rem',
   },
   formGroup: {
-    marginBottom: '1rem',
+    marginBottom: '0.5rem',
   },
   fullWidth: {
     gridColumn: '1 / -1',
@@ -373,71 +697,269 @@ const styles = {
   input: {
     width: '100%',
     padding: '0.75rem',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    marginTop: '0.25rem',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    fontSize: '1rem',
+    marginTop: '0.5rem',
   },
   textarea: {
     width: '100%',
     padding: '0.75rem',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    marginTop: '0.25rem',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    fontSize: '1rem',
+    marginTop: '0.5rem',
     fontFamily: 'inherit',
+    resize: 'vertical',
   },
-  submitBtn: {
-    padding: '0.75rem 1.5rem',
+  saveBtn: {
+    marginTop: '1.5rem',
+    padding: '0.75rem 2rem',
     backgroundColor: '#e94560',
     color: 'white',
     border: 'none',
-    borderRadius: '5px',
+    borderRadius: '8px',
     cursor: 'pointer',
     fontSize: '1rem',
-    marginTop: '1rem',
+    fontWeight: 'bold',
   },
-  imageSection: {
-    backgroundColor: 'white',
-    padding: '2rem',
+  addBtn: {
+    marginBottom: '1.5rem',
+    padding: '0.75rem 1.5rem',
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '1rem',
+    fontWeight: 'bold',
+  },
+  facilitiesList: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: '1rem',
+  },
+  facilityItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '1rem',
+    padding: '1rem',
+    backgroundColor: '#f8f9fa',
     borderRadius: '10px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    marginBottom: '2rem',
   },
-  apartmentsList: {
-    marginTop: '2rem',
-  },
-  tableContainer: {
-    overflowX: 'auto',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    backgroundColor: 'white',
-    borderRadius: '10px',
-    overflow: 'hidden',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-  },
-  tableImage: {
-    width: '50px',
-    height: '50px',
+  facilityImage: {
+    width: '60px',
+    height: '60px',
     objectFit: 'cover',
-    borderRadius: '5px',
+    borderRadius: '8px',
   },
-  editBtn: {
+  facilityImagePlaceholder: {
+    width: '60px',
+    height: '60px',
+    backgroundColor: '#e0e0e0',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '2rem',
+  },
+  facilityInfo: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  facilityName: {
+    fontWeight: 'bold',
+    fontSize: '1rem',
+  },
+  facilityDesc: {
+    fontSize: '0.8rem',
+    color: '#666',
+  },
+  deleteSmallBtn: {
     padding: '0.5rem 1rem',
+    backgroundColor: '#dc3545',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  inquiryHeader: {
+    marginBottom: '1.5rem',
+  },
+  filterGroup: {
+    display: 'flex',
+    gap: '0.5rem',
+    flexWrap: 'wrap',
+  },
+  filterBtn: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#f0f0f0',
+    border: 'none',
+    borderRadius: '20px',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+  },
+  activeFilterBtn: {
+    backgroundColor: '#e94560',
+    color: 'white',
+  },
+  inquiriesList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem',
+  },
+  inquiryCard: {
+    padding: '1.25rem',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '10px',
+    borderLeft: '4px solid #e94560',
+  },
+  inquiryEmail: {
+    color: '#666',
+    fontWeight: 'normal',
+  },
+  inquiryPhone: {
+    color: '#666',
+    fontWeight: 'normal',
+  },
+  inquiryActions: {
+    display: 'flex',
+    gap: '0.5rem',
+    alignItems: 'center',
+  },
+  inquiryDates: {
+    fontSize: '0.85rem',
+    color: '#666',
+    marginBottom: '0.75rem',
+  },
+  inquiryMessage: {
+    margin: '0.75rem 0',
+    lineHeight: '1.5',
+    color: '#333',
+  },
+  inquiryFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '0.75rem',
+    paddingTop: '0.75rem',
+    borderTop: '1px solid #e0e0e0',
+    fontSize: '0.8rem',
+    color: '#999',
+  },
+  statusSelect: {
+    padding: '0.4rem 0.75rem',
+    borderRadius: '20px',
+    border: 'none',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+  },
+  deleteInquiryBtn: {
+    padding: '0.4rem 0.75rem',
+    backgroundColor: '#dc3545',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  replyBtn: {
+    padding: '0.4rem 0.75rem',
     backgroundColor: '#2196F3',
     color: 'white',
     border: 'none',
-    borderRadius: '5px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    marginRight: '0.5rem',
+    fontSize: '0.8rem',
   },
-  deleteBtn: {
-    padding: '0.5rem 1rem',
-    backgroundColor: '#f44336',
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+  },
+  modal: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '2rem',
+    width: '90%',
+    maxWidth: '500px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+  },
+  modalTitle: {
+    marginBottom: '1.5rem',
+    color: '#1a1a2e',
+  },
+  modalActions: {
+    display: 'flex',
+    gap: '1rem',
+    justifyContent: 'flex-end',
+    marginTop: '1.5rem',
+  },
+  cancelModalBtn: {
+    padding: '0.75rem 1.5rem',
+    backgroundColor: '#ccc',
+    color: '#333',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  submitModalBtn: {
+    padding: '0.75rem 1.5rem',
+    backgroundColor: '#4CAF50',
     color: 'white',
     border: 'none',
-    borderRadius: '5px',
+    borderRadius: '8px',
     cursor: 'pointer',
+  },
+  imageUploadArea: {
+    marginTop: '0.5rem',
+  },
+  uploadImageLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1rem',
+    backgroundColor: '#f0f0f0',
+    border: '2px dashed #ccc',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
+  imagePreview: {
+    textAlign: 'center',
+  },
+  previewImage: {
+    maxWidth: '100%',
+    maxHeight: '150px',
+    borderRadius: '8px',
+    marginBottom: '0.5rem',
+  },
+  removeImageBtn: {
+    padding: '0.25rem 0.75rem',
+    backgroundColor: '#dc3545',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+  },
+  noData: {
+    textAlign: 'center',
+    color: '#999',
+    padding: '2rem',
+  },
+  loading: {
+    textAlign: 'center',
+    padding: '4rem',
+    fontSize: '1.2rem',
   },
 };
 

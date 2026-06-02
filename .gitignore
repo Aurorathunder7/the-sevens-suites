@@ -60,3 +60,11 @@ dist/
 
 # Supabase
 supabase/.temp/
+
+/node_modules
+/build
+.env
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
